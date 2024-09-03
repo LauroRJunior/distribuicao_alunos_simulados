@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distribuição de Alunos por Sala</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.14/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            margin-bottom: 20px;
+        }
+        .container label {
+            display: block;
+            margin-bottom: 10px;
+        }
+        .sala-view {
+            display: none;
+            margin-top: 20px;
+        }
+        .sala-view table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .sala-view table, .sala-view th, .sala-view td {
+            border: 1px solid black;
+        }
+        .sala-view th, .sala-view td {
+            padding: 10px;
+            text-align: center;
+        }
+        #alunosDistribuidos {
+            margin-top: 20px;
+        }
+        #distribuicao-total {
+            margin-top: 20px;
+        }
+        .sala-nome {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .sala-nome input {
+            margin-left: 10px;
+            width: 150px;
+        }
+        .pdf-settings {
+            margin-top: 20px;
+        }
+        .pdf-settings label {
+            display: block;
+            margin-top: 10px;
+        }
+        .pdf-settings input {
+            margin-left: 10px;
+            width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Distribuidor de Alunos por Sala</h1>
+
+    <div class="container">
+        <label for="fileInput">Carregar arquivo Excel:</label>
+        <input type="file" id="fileInput" accept=".xlsx, .xls">
+    </div>
+
+    <div class="container">
+        <label for="alunosPorSala">Número de alunos por sala:</label>
+        <input type="number" id="alunosPorSala" min="1" value="30">
+    </div>
+
+    <div class="container">
+        <label for="alunosPorColuna">Número de alunos por coluna:</label>
+        <input type="number" id="alunosPorColuna" min="1" value="6">
+    </div>
+
+    <div class="container">
+        <label for="numSalas">Número de salas:</label>
+        <select id="numSalas">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+        </select>
+    </div>
+
+    <div id="salaNamesContainer"></div>
+
+    <button id="distribuirBtn">Distribuir Alunos</button>
+
+    <div id="alunosDistribuidos">
+        <label for="salaSelect">Selecione a sala:</label>
+        <select id="salaSelect"></select>
+        <div class="pdf-settings">
+            <label for="fontSize">Tamanho da fonte:</label>
+            <input type="number" id="fontSize" min="6" max="20" value="10">
+        </div>
+        <button id="gerarPdfBtn">Gerar PDF</button>
+    </div>
+
+    <div id="distribuicao-total">
+        <h3>Contagem de Alunos por Série e Sala</h3>
+        <div id="contagemContent"></div>
+    </div>
+
+    <div class="sala-view" id="salaView"></div>
+
+    <script>
+        document.getElementById('numSalas').addEventListener('change', function () {
+            const numSalas = parseInt(this.value);
+            const salaNamesContainer = document.getElementById('salaNamesContainer');
+            salaNamesContainer.innerHTML = '';
+
+            for (let i = 1; i <= numSalas; i++) {
+                const salaNomeDiv = document.createElement('div');
+                salaNomeDiv.className = 'sala-nome';
+                salaNomeDiv.innerHTML = `<label for="salaNome${i}">Nome da Sala ${i}:</label>
+                                         <input type="text" id="salaNome${i}" value="Sala ${i}">`;
+                salaNamesContainer.appendChild(salaNomeDiv);
+            }
+        });
+
+        document.getElementById('distribuirBtn').addEventListener('click', function () {
+            const fileInput = document.getElementById('fileInput');
+            const alunosPorSala = parseInt(document.getElementById('alunosPorSala').value);
+            const alunosPorColuna = parseInt(document.getElementById('alunosPorColuna').value);
+            const numSalas = parseInt(document.getElementById('numSalas').value);
+
+            if (!fileInput.files.length) {
+                alert('Por favor, carregue um arquivo Excel.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+                distribuirAlunos(sheet, alunosPorSala, alunosPorColuna, numSalas);
+            };
+            reader.readAsArrayBuffer(fileInput.files[0]);
+        });
+
+        function distribuirAlunos(sheet, alunosPorSala, alunosPorColuna, numSalas) {
+            const turmas = {};
+            const contagemPorSala = {};
+            const salasNomes = [];
+
+            for (let i = 1; i <= numSalas; i++) {
+                const salaNome = document.getElementById(`salaNome${i}`).value;
+                salasNomes.push(salaNome);
+            }
+
+            sheet.forEach(aluno => {
+                const turma = aluno.TURMA;
+                if (!turmas[turma]) turmas[turma] = [];
+                turmas[turma].push(aluno.ALUNOS);
+            });
+
+            const salas = {};
+            let salaAtual = 1;
+
+            while (Object.keys(turmas).length > 0) {
+                const turmasRestantes = Object.keys(turmas).filter(turma => turmas[turma].length > 0);
+
+                if (turmasRestantes.length > 0) {
+                    const turmaSelecionada = turmasRestantes[Math.floor(Math.random() * turmasRestantes.length)];
+                    const aluno = turmas[turmaSelecionada].shift();
+
+                    if (!salas[salaAtual]) salas[salaAtual] = [];
+                    salas[salaAtual].push(aluno);
+
+                    if (!contagemPorSala[salaAtual]) contagemPorSala[salaAtual] = {};
+                    if (!contagemPorSala[salaAtual][turmaSelecionada]) contagemPorSala[salaAtual][turmaSelecionada] = 0;
+                    contagemPorSala[salaAtual][turmaSelecionada]++;
+
+                    salaAtual++;
+                    if (salaAtual > numSalas) salaAtual = 1;
+
+                    if (turmas[turmaSelecionada].length === 0) {
+                        delete turmas[turmaSelecionada];
+                    }
+                }
+            }
+
+            const salaSelect = document.getElementById('salaSelect');
+            salaSelect.innerHTML = '';
+
+            const contagemContent = document.getElementById('contagemContent');
+            contagemContent.innerHTML = '';
+
+            for (let i = 1; i <= numSalas; i++) {
+                const sala = i;
+                const option = document.createElement('option');
+                option.value = sala;
+                option.textContent = salasNomes[i - 1];
+                salaSelect.appendChild(option);
+
+                const turmaContagem = contagemPorSala[sala];
+                let turmaInfo = `${salasNomes[i - 1]}:`;
+                for (let turma in turmaContagem) {
+                    turmaInfo += ` ${turma}: ${turmaContagem[turma]} alunos;`;
+                }
+                contagemContent.innerHTML += `<p>${turmaInfo}</p>`;
+            }
+
+            salaSelect.addEventListener('change', function () {
+                mostrarSalaSelecionada(salas[salaSelect.value], alunosPorColuna);
+            });
+
+            mostrarSalaSelecionada(salas[salaSelect.value], alunosPorColuna);
+            document.getElement
+            document.getElementById('alunosDistribuidos').style.display = 'block';
+        }
+
+        function mostrarSalaSelecionada(alunos, alunosPorColuna) {
+            const salaView = document.getElementById('salaView');
+            salaView.innerHTML = '';
+
+            const table = document.createElement('table');
+            const numRows = Math.ceil(alunos.length / alunosPorColuna);
+
+            let alunoNumero = 1; // Inicia o contador de alunos
+
+            for (let i = 0; i < alunosPorColuna; i++) {
+                const tr = document.createElement('tr');
+                for (let j = 0; j < numRows; j++) {
+                    const td = document.createElement('td');
+                    const aluno = alunos[j + i * numRows];
+                    if (aluno) td.textContent = `${alunoNumero}. ${aluno}`; // Adiciona o número ao lado do nome do aluno
+                    tr.appendChild(td);
+                    alunoNumero++; // Incrementa o contador de alunos
+                }
+                table.appendChild(tr);
+            }
+
+            salaView.appendChild(table);
+            salaView.style.display = 'block';
+        }
+
+        document.getElementById('gerarPdfBtn').addEventListener('click', function () {
+            const salaView = document.getElementById('salaView');
+            const salaSelect = document.getElementById('salaSelect');
+            const salaName = salaSelect.options[salaSelect.selectedIndex].text;
+            const fontSize = parseInt(document.getElementById('fontSize').value);
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            doc.setFontSize(fontSize);
+            doc.text(salaName, 14, 16);
+
+            doc.autoTable({
+                html: salaView.querySelector('table'),
+                startY: 22,
+                theme: 'grid',
+                styles: { fontSize: fontSize },
+                headStyles: { fillColor: [100, 100, 100] },
+            });
+
+            doc.save(`${salaName}.pdf`);
+        });
+    </script>
+</body>
+</html>
